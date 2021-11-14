@@ -1,0 +1,22 @@
+{
+  "name": "asflexlist",
+  "version": "1.0.0",
+  "main": "main.ts",
+  "license": "MIT",
+  "private": false,
+  "devDependencies": {
+    "assemblyscript": "^0.19.17"
+  },
+  "dependencies": {
+    "@assemblyscript/loader": "^0.19.17",
+    "as-bind": "^0.8.2",
+    "as-console": "^6.0.2",
+    "assemblyscript": "^0.19.17"
+  },
+  "scripts": {
+    "asbuild:untouched": "asc assembly/index.ts --exportRuntime --transform as-bind --target debug",
+    "asbuild:optimized": "asc assembly/index.ts --exportRuntime --transform as-bind --target release",
+    "asbuild": "npm run asbuild:untouched && npm run asbuild:optimized",
+    "test": "node tests"
+  }
+}
