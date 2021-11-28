@@ -12,7 +12,7 @@ export function init(): void {
     log(chunk.traverse(7).toString())
 }
 
-class LocalLinkIndex {
+class LinkIndex {
     nodeIndex: u8
     degree: u8
 
@@ -50,13 +50,13 @@ abstract class Chunk<E, D extends number> {
     static offsetBitMask: i32 = ~0 << Chunk.indexBits
     static indexBitMask: i32 = ~Chunk.offsetBitMask
     static numbersOfLinks: StaticArray<u8> = new StaticArray<u8>(Chunk.maxSize)
-    static linkIndexesAbove: StaticArray<Array<LocalLinkIndex>> =
-        new StaticArray<Array<LocalLinkIndex>>(Chunk.maxSize)
+    static linkIndexesAbove: StaticArray<Array<LinkIndex>> =
+        new StaticArray<Array<LinkIndex>>(Chunk.maxSize)
 
     @inline
-    static calculateLinkIndexesAbove(localIndex: u8): Array<LocalLinkIndex> {
-        if (localIndex == 0) return new Array<LocalLinkIndex>(0)
-        const linkIndexes = new Array<LocalLinkIndex>(this.indexBits as i32)
+    static calculateLinkIndexesAbove(localIndex: u8): Array<LinkIndex> {
+        if (localIndex == 0) return new Array<LinkIndex>(0)
+        const linkIndexes = new Array<LinkIndex>(this.indexBits as i32)
         let index = localIndex
         for (let degree = 0 as u8; degree < (this.indexBits as u8); degree++) {
             if ((localIndex as i32) + (1 << degree) > this.maxSize) {
@@ -64,7 +64,7 @@ abstract class Chunk<E, D extends number> {
                 return linkIndexes
             }
             if (degree == 0) index--
-            linkIndexes[degree] = new LocalLinkIndex(index, degree)
+            linkIndexes[degree] = new LinkIndex(index, degree)
             index = index & ~(1 << degree)
         }
         return linkIndexes
@@ -84,7 +84,6 @@ abstract class Chunk<E, D extends number> {
         }
     }
 
-    offset: i32
     displacement: D
     elements: StaticArray<E> = new StaticArray<E>(Chunk.maxSize)
     linkLengths: StaticArray<StaticArray<D>> = new StaticArray<StaticArray<D>>(Chunk.maxSize)
@@ -92,8 +91,7 @@ abstract class Chunk<E, D extends number> {
     totalLength: D
 
     // @ts-ignore
-    constructor(offset: i32, displacement: D = 0) {
-        this.offset = offset
+    constructor(displacement: D = 0) {
         this.displacement = displacement
         this.totalLength = displacement
         for (let i = 0; i < this.linkLengths.length; i++) {
@@ -120,7 +118,7 @@ abstract class Chunk<E, D extends number> {
         for (let i = 0; i < linkIndexes.length; i++) {
             const linkIndex = linkIndexes[i]
             // @ts-ignore
-            this.setLinkLengthUnchecked(linkIndex, this.getLinkLengthUnchecked(linkIndex) + distanceFromEnd)
+            this.setLinkLengthWithLinkIndexUnchecked(linkIndex, this.getLinkLengthWithLinkIndexUnchecked(linkIndex) + distanceFromEnd)
         }
         this.elements[this.size] = element
         this.size++
@@ -135,7 +133,7 @@ abstract class Chunk<E, D extends number> {
         let toGo = distanceFromStart - this.displacement
         let index: i32 = 0
         for (let degree = Chunk.indexBits - 1; degree >= 0; degree--) {
-            const toNext = this.getLinkLengthLocal(index, degree as u8)
+            const toNext = this.getLinkLengthUnchecked(index, degree as u8)
             if (toGo >= toNext) {
                 // @ts-ignore
                 toGo -= toNext
@@ -147,47 +145,13 @@ abstract class Chunk<E, D extends number> {
     }
 
     @inline
-    getLinkLengthUnchecked(localIndex: LocalLinkIndex): D {
-        return this.getLinkLengthLocalUnchecked(localIndex.nodeIndex, localIndex.degree)
+    getLinkLengthWithLinkIndexUnchecked(linkIndex: LinkIndex): D {
+        return this.getLinkLengthUnchecked(linkIndex.nodeIndex, linkIndex.degree)
     }
 
     @inline
-    setLinkLengthUnchecked(localIndex: LocalLinkIndex, value: D): void {
-        this.setLinkLengthLocalUnchecked(localIndex.nodeIndex, localIndex.degree, value)
-    }
-
-    @inline
-    /**
-     * Converts `globalIndex` to a local index by stripping all offset bits
-     * @param globalIndex
-     */
-    toLocalIndex(globalIndex: i32): u8 {
-        return globalIndex & Chunk.indexBitMask
-    }
-
-    @inline
-    /**
-     * Converts `localIndex` to a global index by adding {@link this.offset}
-     * @param localIndex
-     */
-    toGlobalIndex(localIndex: u8): i32 {
-        return this.offset + localIndex
-    }
-
-    @inline
-    /**
-     * Gets the length of the link starting at `index` of degree `degree`, while doing range checks
-     * @param index the local index of node a
-     * @param degree the degree of the link
-     */
-    getLinkLengthLocal(index: i32, degree: u8): D {
-        if (index < 0 || index >= this.size) {
-            throw new Error(`Chunk index ${index} out of range: \n${this.printDebug()}`)
-        }
-        if (degree < 0 || degree >= Chunk.numbersOfLinks[index]) {
-            throw new Error(`Chunk degree ${degree} at index ${index} out of range: \n${this.printDebug()}`)
-        }
-        return this.linkLengths[index][degree]
+    setLinkLengthWithLinkIndexUnchecked(linkIndex: LinkIndex, value: D): void {
+        this.setLinkLengthUnchecked(linkIndex.nodeIndex, linkIndex.degree, value)
     }
 
     @inline
@@ -196,7 +160,7 @@ abstract class Chunk<E, D extends number> {
      * @param index the local index of node a
      * @param degree the degree of the link
      */
-    getLinkLengthLocalUnchecked(index: i32, degree: u8): D {
+    getLinkLengthUnchecked(index: i32, degree: u8): D {
         return this.linkLengths[index][degree]
     }
 
@@ -207,9 +171,25 @@ abstract class Chunk<E, D extends number> {
      * @param degree the degree of the link
      * @param length the new length of the link
      */
-    setLinkLengthLocalUnchecked(index: i32, degree: u8, length: D): void {
+    setLinkLengthUnchecked(index: i32, degree: u8, length: D): void {
         this.linkLengths[index][degree] = length
     }
+
+    // @inline
+    // /**
+    //  * Gets the length of the link starting at `index` of degree `degree`, while doing range checks
+    //  * @param index the local index of node a
+    //  * @param degree the degree of the link
+    //  */
+    // getLinkLength(index: i32, degree: u8): D {
+    //     if (index < 0 || index >= this.size) {
+    //         throw new Error(`Chunk index ${index} out of range: \n${this.printDebug()}`)
+    //     }
+    //     if (degree < 0 || degree >= Chunk.numbersOfLinks[index]) {
+    //         throw new Error(`Chunk degree ${degree} at index ${index} out of range: \n${this.printDebug()}`)
+    //     }
+    //     return this.linkLengths[index][degree]
+    // }
 
     printDebug(): string {
         let result = "\n"
@@ -252,9 +232,9 @@ abstract class Chunk<E, D extends number> {
     }
 }
 
-class ChunkChunk<E, D extends number> extends Chunk<Chunk<E, D>, D> {
+class DataChunkChunk<E, D extends number> extends Chunk<DataChunk<E, D>, D> {
     @inline
-    get lastChunk(): Chunk<E, D> {
+    get lastChunk(): DataChunk<E, D> {
         return this.elements[this.lastIndex]
     }
 
@@ -263,7 +243,23 @@ class ChunkChunk<E, D extends number> extends Chunk<Chunk<E, D>, D> {
         if (lastChunk.size < Chunk.maxSize) {
             lastChunk.appendUnchecked(element, distanceFromEnd)
         } else {
-            this.appendUnchecked(new Chunk(this.offset + ))
+            this.appendUnchecked(new Chunk())
+        }
+    }
+}
+
+class ChunkChunkChunk<E, D extends number> extends Chunk<Chunk<Chunk<E, D>, D>, D> {
+    @inline
+    get lastChunk(): Chunk<Chunk<E, D>, D> {
+        return this.elements[this.lastIndex]
+    }
+
+    appendElementUnchecked(element: E, distanceFromEnd: D): void {
+        const lastChunk = this.lastChunk;
+        if (lastChunk.size < Chunk.maxSize) {
+            lastChunk.appendUnchecked(element, distanceFromEnd)
+        } else {
+            this.appendUnchecked(new Chunk())
         }
     }
 }
